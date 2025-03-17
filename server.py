@@ -9,7 +9,7 @@ from flask_cors import CORS
 
 # Load configuration file path from environment variables (for Render)
 CONFIG_PATH = os.getenv("CONFIGS_PATH", "configs.yaml")
-MODEL_PATH = os.getenv("MODEL_PATH", "optimized_model.onnx")
+MODEL_PATH = os.getenv("MODEL_PATH", "model.onnx")
 
 # Ensure required files exist
 if not os.path.exists(CONFIG_PATH):
