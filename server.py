@@ -6,29 +6,17 @@ import onnxruntime as ort
 import base64
 import os
 import uuid
-import gdown  # Used to download the model
 from mltu.configs import BaseModelConfigs
 
 app = Flask(__name__)
 CORS(app, resources={r"/predict": {"origins": "*"}})
 
-# ------------------------------
-# ✅ Step 1: Download Model from Google Drive (if not found)
-# ------------------------------
-MODEL_URL = "https://drive.google.com/file/d/1G2DsOLXe9Aup7J0YbHRahHTcyoLdUE0B/view?usp=sharing"
-MODEL_PATH = "model.onnx"
-
-if not os.path.exists(MODEL_PATH):
-    print("[INFO] Downloading ONNX model from Google Drive...")
-    gdown.download(MODEL_URL, MODEL_PATH, quiet=False)
-
-# ------------------------------
-# ✅ Step 2: Load Model and Configs
-# ------------------------------
+# Load Model (Ensure model and config files are in the project directory)
+model_path = os.path.join(os.path.dirname(__file__), "model.onnx")
 config_path = os.path.join(os.path.dirname(__file__), "configs.yaml")
 
 configs = BaseModelConfigs.load(config_path)
-session = ort.InferenceSession(MODEL_PATH, providers=["CPUExecutionProvider"])
+session = ort.InferenceSession(model_path, providers=["CPUExecutionProvider"])
 
 class OCRModel:
     def __init__(self, configs, session):
@@ -67,9 +55,6 @@ class OCRModel:
 
 ocr_model = OCRModel(configs, session)
 
-# ------------------------------
-# ✅ Step 3: Define API Endpoint
-# ------------------------------
 @app.route("/predict", methods=["POST"])
 def predict_route():
     data = request.json
@@ -98,8 +83,6 @@ def predict_route():
 
     return jsonify({"captcha_text": result_text})
 
-# ------------------------------
-# ✅ Step 4: Entry Point for Vercel Deployment
-# ------------------------------
+# Entry point for Vercel
 def handler(event, context):
     return app(event, context)
