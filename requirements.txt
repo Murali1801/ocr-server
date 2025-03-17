@@ -1,7 +1,8 @@
+numpy<2
+onnxruntime
+mltu
 flask
 flask-cors
-onnxruntime==1.15.0  # CPU version
-numpy
+gunicorn
 opencv-python
 pyyaml
-gunicorn
