@@ -1,0 +1,9 @@
+batch_size: 64
+height: 80
+learning_rate: 0.0005
+max_text_length: 6
+model_path: Models/Captcha_OCR_Model_REV3\202502190951
+train_epochs: 1000
+train_workers: 20
+vocab: 23456789ABCDEFGHKLMNPRSTUVWYZabcdefghklmnprstuvwyz
+width: 215
