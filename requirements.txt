@@ -1,6 +1,6 @@
 flask
 flask-cors
-onnxruntime
+onnxruntime==1.15.0  # CPU-compatible ONNX runtime
 numpy
 opencv-python
 pyyaml
