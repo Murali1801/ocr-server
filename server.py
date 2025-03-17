@@ -1,88 +1,88 @@
-from flask import Flask, request, jsonify
-from flask_cors import CORS
-import cv2
+import os
+import base64
+import yaml
 import numpy as np
 import onnxruntime as ort
-import base64
-import os
-import uuid
-from mltu.configs import BaseModelConfigs
+import cv2
+from flask import Flask, request, jsonify
+from flask_cors import CORS
 
+# Load configuration file path from environment variables (for Render)
+CONFIG_PATH = os.getenv("CONFIGS_PATH", "configs.yaml")
+MODEL_PATH = os.getenv("MODEL_PATH", "model.onnx")
+
+# Ensure required files exist
+if not os.path.exists(CONFIG_PATH):
+    raise FileNotFoundError(f"Config file not found: {CONFIG_PATH}")
+if not os.path.exists(MODEL_PATH):
+    raise FileNotFoundError(f"ONNX model file not found: {MODEL_PATH}")
+
+# Load configuration
+with open(CONFIG_PATH, "r") as f:
+    config = yaml.safe_load(f)
+
+char_list = config.get("char_list", "23456789ABCDEFGHKLMNPRSTUVWYZabcdefghklmnprstuvwyz")
+input_size = tuple(config.get("input_size", [100, 32]))  # Default (width, height)
+blank_token = len(char_list)
+
+# Initialize ONNX model session
+session = ort.InferenceSession(MODEL_PATH, providers=["CPUExecutionProvider"])
+
+# Create Flask app
 app = Flask(__name__)
-CORS(app, resources={r"/predict": {"origins": "*"}})
+CORS(app)  # Enable CORS for Chrome Extension
 
-# Load Model (Ensure model and config files are in the project directory)
-model_path = os.path.join(os.path.dirname(__file__), "model.onnx")
-config_path = os.path.join(os.path.dirname(__file__), "configs.yaml")
+def preprocess_image(base64_string):
+    """Decode Base64 image and preprocess it for ONNX model."""
+    try:
+        img_data = base64.b64decode(base64_string.split(",")[1])
+        np_arr = np.frombuffer(img_data, np.uint8)
+        image = cv2.imdecode(np_arr, cv2.IMREAD_GRAYSCALE)
 
-configs = BaseModelConfigs.load(config_path)
-session = ort.InferenceSession(model_path, providers=["CPUExecutionProvider"])
-
-class OCRModel:
-    def __init__(self, configs, session):
-        self.session = session
-        self.width = configs.width
-        self.height = configs.height
-        self.char_list = configs.vocab
-
-    def predict(self, image_path):
-        image = cv2.imread(image_path)
         if image is None:
-            return ""
+            raise ValueError("Decoded image is None.")
 
-        image = cv2.resize(image, (self.width, self.height))
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        image = np.expand_dims(image, axis=0).astype(np.float32)
+        image = cv2.resize(image, input_size)
+        image = image.astype(np.float32) / 255.0
+        image = np.expand_dims(image, axis=(0, 1))  # Shape: (1, 1, H, W)
+        return image
+    except Exception as e:
+        raise ValueError(f"Error processing image: {str(e)}")
 
-        preds = self.session.run(None, {self.session.get_inputs()[0].name: image})[0]
+def run_onnx_inference(image):
+    """Run OCR inference using the ONNX model."""
+    try:
+        input_name = session.get_inputs()[0].name
+        output_name = session.get_outputs()[0].name
+        result = session.run([output_name], {input_name: image})[0]
+        return result
+    except Exception as e:
+        raise RuntimeError(f"ONNX inference error: {str(e)}")
 
-        # CTC Greedy Decoding
-        blank_id = len(self.char_list)
-        decoded = []
-        previous_char = None
-
-        for time_step in preds[0]:
-            char_id = np.argmax(time_step)
-            if char_id != blank_id:
-                current_char = self.char_list[char_id]
-                if current_char != previous_char:
-                    decoded.append(current_char)
-                previous_char = current_char
-            else:
-                previous_char = None
-
-        return ''.join(decoded)
-
-ocr_model = OCRModel(configs, session)
+@app.route("/", methods=["GET"])
+def home():
+    return jsonify({"message": "OCR API is running"}), 200
 
 @app.route("/predict", methods=["POST"])
-def predict_route():
-    data = request.json
-    if not data or "image" not in data:
-        return jsonify({"error": "No image data provided."}), 400
-
+def predict():
     try:
-        header, encoded = data["image"].split(",", 1)
-        image_data = base64.b64decode(encoded)
-    except Exception:
-        return jsonify({"error": "Invalid image format."}), 400
+        data = request.get_json()
+        if not data or "image" not in data:
+            return jsonify({"error": "Missing 'image' field"}), 400
 
-    tmp_filename = f"temp_{uuid.uuid4().hex}.png"
-    try:
-        with open(tmp_filename, "wb") as f:
-            f.write(image_data)
-    except Exception:
-        return jsonify({"error": "Failed to write temporary image file."}), 500
+        image = preprocess_image(data["image"])
+        result = run_onnx_inference(image)
 
-    result_text = ocr_model.predict(tmp_filename)
-    
-    try:
-        os.remove(tmp_filename)
-    except Exception:
-        print(f"Warning: Failed to delete temporary file {tmp_filename}")
+        # Convert result to readable text
+        predicted_text = "".join([char_list[i] for i in np.argmax(result, axis=2)[0] if i != blank_token])
 
-    return jsonify({"captcha_text": result_text})
+        return jsonify({"captcha_text": predicted_text}), 200
+    except ValueError as ve:
+        return jsonify({"error": str(ve)}), 400
+    except RuntimeError as re:
+        return jsonify({"error": str(re)}), 500
+    except Exception as e:
+        return jsonify({"error": f"Unexpected error: {str(e)}"}), 500
 
-# Entry point for Vercel
-def handler(event, context):
-    return app(event, context)
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=10000, debug=False)

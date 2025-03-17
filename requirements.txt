@@ -1,8 +1,7 @@
-Flask
+flask
 flask-cors
-numpy
-opencv-python-headless
 onnxruntime
-mltu
+numpy
+opencv-python
+pyyaml
 gunicorn
-
