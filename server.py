@@ -11,14 +11,13 @@ from mltu.configs import BaseModelConfigs
 app = Flask(__name__)
 CORS(app, resources={r"/predict": {"origins": "*"}})
 
-# Use relative paths (Render does not support absolute Windows paths)
-MODEL_DIR = os.path.dirname(os.path.abspath(__file__))
-model_path = os.path.join(MODEL_DIR, "model.onnx")
-config_path = os.path.join(MODEL_DIR, "configs.yaml")
+# Use relative paths for deployment
+MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model.onnx")
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "configs.yaml")
 
-# Load model and configurations
-configs = BaseModelConfigs.load(config_path)
-session = ort.InferenceSession(model_path, providers=["CPUExecutionProvider"])
+# Load configurations and model
+configs = BaseModelConfigs.load(CONFIG_PATH)
+session = ort.InferenceSession(MODEL_PATH, providers=["CPUExecutionProvider"])
 
 class OCRModel:
     def __init__(self, configs, session):
@@ -28,24 +27,25 @@ class OCRModel:
         self.char_list = configs.vocab
 
     def predict(self, image_path):
-        image = cv2.imread(image_path)
+        # Load image as grayscale (if the model was trained on grayscale images)
+        image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
         if image is None:
             print(f"❌ Error: Could not load image {image_path}")
             return ""
-
-        # Resize and preprocess image
+        # Resize image to expected dimensions
         image = cv2.resize(image, (self.width, self.height))
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        image = np.expand_dims(image, axis=(0, 1)).astype(np.float32)
-
-        # Run ONNX model
+        image = image.astype(np.float32) / 255.0
+        # Expand dimensions to create shape: (1, 1, height, width)
+        image = np.expand_dims(image, axis=0)
+        image = np.expand_dims(image, axis=0)
+        
+        # Run ONNX inference
         preds = self.session.run(None, {self.session.get_inputs()[0].name: image})[0]
-
-        # CTC Greedy Decoding:
-        blank_id = len(self.char_list)  # The blank token is at the last index.
+        
+        # CTC Greedy Decoding
+        blank_id = len(self.char_list)
         decoded = []
         previous_char = None
-
         for time_step in preds[0]:
             char_id = np.argmax(time_step)
             if char_id != blank_id:
@@ -55,7 +55,7 @@ class OCRModel:
                 previous_char = current_char
             else:
                 previous_char = None
-
+        
         return ''.join(decoded)
 
 # Instantiate the OCR model
@@ -69,26 +69,30 @@ def predict_route():
 
     try:
         header, encoded = data["image"].split(",", 1)
-        image_data = base64.b64decode(encoded)
-    except Exception:
+    except Exception as e:
         return jsonify({"error": "Invalid image format."}), 400
+
+    try:
+        image_data = base64.b64decode(encoded)
+    except Exception as e:
+        return jsonify({"error": "Base64 decoding failed."}), 400
 
     tmp_filename = f"temp_{uuid.uuid4().hex}.png"
     try:
         with open(tmp_filename, "wb") as f:
             f.write(image_data)
-    except Exception:
+    except Exception as e:
         return jsonify({"error": "Failed to write temporary image file."}), 500
 
     result_text = ocr_model.predict(tmp_filename)
 
     try:
         os.remove(tmp_filename)
-    except Exception:
+    except Exception as e:
         print(f"Warning: Failed to delete temporary file {tmp_filename}")
 
     return jsonify({"captcha_text": result_text})
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))  # Render assigns a dynamic port
+    port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port, debug=False)
