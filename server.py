@@ -101,5 +101,5 @@ def predict_route():
 
 if __name__ == "__main__":
     # Render provides the PORT environment variable.
-    port = int(os.environ.get("PORT", 10000))
+    port = int(os.environ.get("PORT", 8000))
     app.run(host="0.0.0.0", port=port, debug=False)
